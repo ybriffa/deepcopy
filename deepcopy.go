@@ -4,18 +4,21 @@ import (
 	"reflect"
 )
 
-func copyArray(v reflect.Value) interface{} {
+type copier struct {
+	ptrs map[reflect.Type]map[uintptr]reflect.Value
+}
+
+func (c *copier) copyArray(v reflect.Value) reflect.Value {
 	if v.IsNil() {
-		return nil
+		return reflect.Zero(v.Type())
 	}
 
 	array := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
 	for i := 0; i < v.Len(); i++ {
-		rawSubValue := Copy(v.Index(i).Interface())
-		if rawSubValue == nil {
+		subValue := c.copy(v.Index(i))
+		if !subValue.IsValid() {
 			continue
 		}
-		subValue := reflect.ValueOf(rawSubValue)
 
 		arrayValue := array.Index(i)
 		if !arrayValue.CanSet() {
@@ -23,37 +26,69 @@ func copyArray(v reflect.Value) interface{} {
 		}
 		arrayValue.Set(subValue.Convert(arrayValue.Type()))
 	}
-	return array.Interface()
+	return array
 }
 
-func copyMap(v reflect.Value) interface{} {
+func (c *copier) copyMap(v reflect.Value) reflect.Value {
 	if v.IsNil() {
-		return nil
+		return reflect.Zero(v.Type())
 	}
 
 	resultMap := reflect.MakeMap(v.Type())
 	for _, key := range v.MapKeys() {
 		value := v.MapIndex(key)
-		duplicatedKey := reflect.ValueOf(Copy(key.Interface()))
-		duplicatedValue := reflect.ValueOf(Copy(value.Interface()))
+		duplicatedKey := c.copy(key)
+		duplicatedValue := c.copy(value)
 
 		resultMap.SetMapIndex(duplicatedKey.Convert(key.Type()), duplicatedValue.Convert(value.Type()))
 	}
-	return resultMap.Interface()
+	return resultMap
 }
 
-func copyPtr(v reflect.Value) interface{} {
+func (c *copier) copyPtr(v reflect.Value) reflect.Value {
 	if v.IsNil() {
-		return nil
+		return reflect.Zero(v.Type())
 	}
-	retValue := Copy(v.Elem().Interface())
-	ptr := reflect.New(reflect.ValueOf(retValue).Type())
-	ptr.Elem().Set(reflect.ValueOf(retValue))
-	return ptr.Interface()
+
+	var newValue reflect.Value
+
+	if v.Elem().CanAddr() {
+		ptrs, exists := c.ptrs[v.Type()]
+		if exists {
+			if newValue, exists := ptrs[v.Elem().UnsafeAddr()]; exists {
+				return newValue
+			}
+		}
+	}
+
+	newValue = c.copy(v.Elem())
+
+	if v.Elem().CanAddr() {
+		ptrs, exists := c.ptrs[v.Type()]
+		if exists {
+			if newValue, exists := ptrs[v.Elem().UnsafeAddr()]; exists {
+				return newValue
+			}
+		}
+	}
+
+	ptr := reflect.New(newValue.Type())
+	ptr.Elem().Set(newValue)
+	return ptr
 }
 
-func copyStruct(v reflect.Value) interface{} {
-	newStruct := reflect.New(v.Type()).Elem()
+func (c *copier) copyStruct(v reflect.Value) reflect.Value {
+	newStructPtr := reflect.New(v.Type())
+	newStruct := newStructPtr.Elem()
+
+	if v.CanAddr() {
+		ptrs := c.ptrs[newStructPtr.Type()]
+		if ptrs == nil {
+			ptrs = make(map[uintptr]reflect.Value)
+			c.ptrs[newStructPtr.Type()] = ptrs
+		}
+		ptrs[v.UnsafeAddr()] = newStructPtr
+	}
 
 	for i := 0; i < v.NumField(); i++ {
 		newStructValue := newStruct.Field(i)
@@ -61,94 +96,100 @@ func copyStruct(v reflect.Value) interface{} {
 			continue
 		}
 
-		rawCopied := Copy(v.Field(i).Interface())
-		if rawCopied == nil {
-			continue
-		}
-
-		copied := reflect.ValueOf(rawCopied)
-		if copied.Kind() == reflect.Ptr && copied.IsNil() {
+		copied := c.copy(v.Field(i))
+		if !copied.IsValid() {
 			continue
 		}
 
 		newStructValue.Set(copied.Convert(newStructValue.Type()))
 	}
-	return newStruct.Interface()
+	return newStruct
 }
 
 // Copy takes any objects and create a deep copy of it, and all its fields or elements.
 // In case of reflect.Invalid, reflect.Chan and reflect.UnsafePointer types, it returns nil.
 func Copy(i interface{}) interface{} {
-	v := reflect.ValueOf(i)
+	c := copier{
+		ptrs: map[reflect.Type]map[uintptr]reflect.Value{},
+	}
+	ret := c.copy(reflect.ValueOf(i))
+	return ret.Interface()
+}
+
+func (c *copier) copy(v reflect.Value) reflect.Value {
 
 	switch v.Kind() {
 	case reflect.Invalid:
-		return nil
+		return reflect.ValueOf(nil)
 
 		// Bool
 	case reflect.Bool:
-		return v.Bool()
+		return reflect.ValueOf(v.Bool())
 
 		// Int
 	case reflect.Int:
-		return int(v.Int())
+		return reflect.ValueOf(int(v.Int()))
 	case reflect.Int8:
-		return int8(v.Int())
+		return reflect.ValueOf(int8(v.Int()))
 	case reflect.Int16:
-		return int16(v.Int())
+		return reflect.ValueOf(int16(v.Int()))
 	case reflect.Int32:
-		return int32(v.Int())
+		return reflect.ValueOf(int32(v.Int()))
 	case reflect.Int64:
-		return v.Int()
+		return reflect.ValueOf(v.Int())
 
 		// Unit
 	case reflect.Uint:
-		return uint(v.Uint())
+		return reflect.ValueOf(uint(v.Uint()))
 	case reflect.Uint8:
-		return uint8(v.Uint())
+		return reflect.ValueOf(uint8(v.Uint()))
 	case reflect.Uint16:
-		return uint16(v.Uint())
+		return reflect.ValueOf(uint16(v.Uint()))
 	case reflect.Uint32:
-		return uint32(v.Uint())
+		return reflect.ValueOf(uint32(v.Uint()))
 	case reflect.Uint64:
-		return v.Uint()
+		return reflect.ValueOf(v.Uint())
 
 		// Float
 	case reflect.Float32:
-		return float32(v.Float())
+		return reflect.ValueOf(float32(v.Float()))
 	case reflect.Float64:
-		return v.Float()
+		return reflect.ValueOf(v.Float())
 
 		// Complex
 	case reflect.Complex64:
-		return complex64(v.Complex())
+		return reflect.ValueOf(complex64(v.Complex()))
 	case reflect.Complex128:
-		return v.Complex()
+		return reflect.ValueOf(v.Complex())
 
 		// String
 	case reflect.String:
-		return v.String()
+		return reflect.ValueOf(v.String())
 
 		// Array
 	case reflect.Array, reflect.Slice:
-		return copyArray(v)
+		return c.copyArray(v)
 
 		// Map
 	case reflect.Map:
-		return copyMap(v)
+		return c.copyMap(v)
 
 		// Ptr
 	case reflect.Ptr:
-		return copyPtr(v)
+		return c.copyPtr(v)
 
 		// Struct
 	case reflect.Struct:
-		return copyStruct(v)
+		return c.copyStruct(v)
 
 		// Func
 	case reflect.Func:
-		return i
+		return v
+
+		// Interface
+	case reflect.Interface:
+		return c.copy(v.Elem())
 	}
 
-	return nil
+	return reflect.Zero(v.Type())
 }
