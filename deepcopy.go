@@ -40,9 +40,29 @@ func (c *copier) copyMap(v reflect.Value) reflect.Value {
 		duplicatedKey := c.copy(key)
 		duplicatedValue := c.copy(value)
 
-		resultMap.SetMapIndex(duplicatedKey.Convert(key.Type()), duplicatedValue.Convert(value.Type()))
+		if isNillable(duplicatedKey) && !duplicatedKey.IsNil() {
+			duplicatedKey = duplicatedKey.Convert(key.Type())
+		}
+
+		if isNillable(duplicatedValue) && !duplicatedValue.IsNil() {
+			duplicatedValue = duplicatedValue.Convert(value.Type())
+		}
+
+		if !duplicatedValue.IsValid() {
+			duplicatedValue = reflect.Zero(resultMap.Type().Elem())
+		}
+
+		resultMap.SetMapIndex(duplicatedKey, duplicatedValue)
 	}
 	return resultMap
+}
+
+func isNillable(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Chan, reflect.Interface, reflect.Ptr, reflect.Func:
+		return true
+	}
+	return false
 }
 
 func (c *copier) copyPtr(v reflect.Value) reflect.Value {
