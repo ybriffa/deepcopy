@@ -40,11 +40,11 @@ func (c *copier) copyMap(v reflect.Value) reflect.Value {
 		duplicatedKey := c.copy(key)
 		duplicatedValue := c.copy(value)
 
-		if isNillable(duplicatedKey) && !duplicatedKey.IsNil() {
+		if !isNillable(duplicatedKey) || !duplicatedKey.IsNil() {
 			duplicatedKey = duplicatedKey.Convert(key.Type())
 		}
 
-		if isNillable(duplicatedValue) && !duplicatedValue.IsNil() {
+		if !isNillable(duplicatedValue) || !duplicatedValue.IsNil() {
 			duplicatedValue = duplicatedValue.Convert(value.Type())
 		}
 
