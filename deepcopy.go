@@ -133,7 +133,7 @@ func Copy(i interface{}) interface{} {
 		ptrs: map[reflect.Type]map[uintptr]reflect.Value{},
 	}
 	ret := c.copy(reflect.ValueOf(i))
-	if ret.CanAddr() && ret.IsNil() {
+	if ret.Kind() == reflect.Invalid {
 		return nil
 	}
 	return ret.Interface()
